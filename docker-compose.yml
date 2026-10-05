@@ -14,29 +14,39 @@ services:
       timeout: 5s
       retries: 5
 
-  # RustFS high-performance object storage acting as your S3 backend
+  # RustFS high-performance distributed object storage (S3-compatible)
   rustfs:
-    image: minio/minio:latest # RustFS implements the exact S3 API
+    image: rustfs/rustfs:1.0.1
     container_name: rustfs_storage
-    command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${RUSTFS_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${RUSTFS_SECRET_KEY}
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
     volumes:
       - rustfs_data:/data
     ports:
       - "9000:9000"
       - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
-  # Automate the creation of the target MLflow bucket inside RustFS
+  # Automate bucket provisioning using native RustFS CLI client (rc)
   rustfs-init:
-    image: minio/mc
+    image: rustfs/rc:1.0.1
+    container_name: rustfs_init
     depends_on:
-      - rustfs
+      rustfs:
+        condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      until (/usr/bin/mc alias set myrustfs http://rustfs:9000 ${RUSTFS_ACCESS_KEY} ${RUSTFS_SECRET_KEY}) do echo 'Waiting for RustFS...' && sleep 1; done;
-      /usr/bin/mc mb --ignore-existing myrustfs/${RUSTFS_BUCKET};
+      until (/usr/bin/rc alias set myrustfs http://rustfs:9000 ${RUSTFS_ACCESS_KEY} ${RUSTFS_SECRET_KEY}) do echo 'Waiting for RustFS...' && sleep 1; done;
+      /usr/bin/rc mb --ignore-existing myrustfs/${RUSTFS_BUCKET} || /usr/bin/rc mb myrustfs/${RUSTFS_BUCKET} || true;
       exit 0;
       "
 
@@ -49,7 +59,9 @@ services:
       db:
         condition: service_healthy
       rustfs:
-        condition: service_started
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
     environment:
       # S3 Credentials mapping to RustFS
       AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
