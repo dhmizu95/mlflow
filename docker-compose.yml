@@ -4,7 +4,7 @@ services:
     container_name: mlflow_db
     environment:
       POSTGRES_USER: mlflow
-      POSTGRES_PASSWORD: mlflow_db_password
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: mlflow_metadata
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -27,8 +27,8 @@ services:
     volumes:
       - rustfs_data:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/health"]
       interval: 5s
@@ -70,15 +70,20 @@ services:
       
       # MLflow Built-in Authentication Flags
       MLFLOW_FLASK_SERVER_SECRET_KEY: ${FLASK_SECRET_KEY}
-      MLFLOW_AUTH_ADMIN_USERNAME: ${ADMIN_USERNAME}
-      MLFLOW_AUTH_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-    command: >
-      mlflow server
-      --host 0.0.0.0
-      --port 5000
-      --backend-store-uri postgresql://mlflow:mlflow_db_password@db:5432/mlflow_metadata
-      --default-artifact-root s3://${RUSTFS_BUCKET}/
-      --app-name basic-auth
+      MLFLOW_AUTH_CONFIG_PATH: /tmp/basic_auth.ini
+      DB_PASSWORD: ${DB_PASSWORD}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET}
+    # basic_auth.ini ignores env vars, so generate it at startup (auth tables live in Postgres, not SQLite)
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        printf '[mlflow]\ndefault_permission = NO_PERMISSIONS\ndatabase_uri = postgresql://mlflow:%s@db:5432/mlflow_metadata\nadmin_username = %s\nadmin_password = %s\nauthorization_function = mlflow.server.auth:authenticate_request_basic_auth\n' "$$DB_PASSWORD" "$$ADMIN_USERNAME" "$$ADMIN_PASSWORD" > /tmp/basic_auth.ini
+        exec mlflow server --host 0.0.0.0 --port 5000 \
+          --backend-store-uri "postgresql://mlflow:$$DB_PASSWORD@db:5432/mlflow_metadata" \
+          --artifacts-destination "s3://$$RUSTFS_BUCKET/" \
+          --serve-artifacts --app-name basic-auth
 
 volumes:
   postgres_data:
