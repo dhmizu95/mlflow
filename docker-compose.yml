@@ -27,8 +27,8 @@ services:
     volumes:
       - rustfs_data:/data
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:19001:9001"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/health"]
       interval: 5s
@@ -38,7 +38,7 @@ services:
 
   # Automate bucket provisioning using native RustFS CLI client (rc)
   rustfs-init:
-    image: rustfs/rc:1.0.1
+    image: rustfs/rc:v0.1.36
     container_name: rustfs_init
     depends_on:
       rustfs:
